@@ -745,9 +745,16 @@ function renderPacientes(){
   const q=(document.getElementById('searchPac').value||'').toLowerCase();
   let lista = pacientes;
   if(mesPacFiltro !== 'todos'){
-    // Filtrar pacientes com atendimentos no mês selecionado
-    const mesIdx = allData.meses.indexOf(mesPacFiltro);
-    const df_mes = window._orcMes && window._orcMes[mesPacFiltro] ? window._orcMes[mesPacFiltro] : null;
+    // Reconstrói a lista de pacientes a partir dos orçamentos do mês selecionado
+    const mesLista = pacPorMes[mesPacFiltro] || [];
+    const porNome = {};
+    mesLista.forEach(e => {
+      if(!porNome[e.nome]) porNome[e.nome] = {nome:e.nome, fat:0, atend:0, servs:{}};
+      porNome[e.nome].fat += e.valor;
+      porNome[e.nome].atend += 1;
+      porNome[e.nome].servs[e.servico] = (porNome[e.nome].servs[e.servico]||0)+1;
+    });
+    lista = Object.values(porNome).sort((a,b)=>b.fat-a.fat);
   }
   const filtered = lista.filter(p=>p.nome.toLowerCase().includes(q));
   document.getElementById('pacList').innerHTML=filtered.map(p=>{
@@ -1546,6 +1553,8 @@ function renderDRE(){
   const resOp = lucroBruto - despOpTotal;
   const ebit = resOp - despFinanceiras;
   const resLiq = ebit - valImpDireto;
+  const investimentos = d.blocos.Investimentos||0;
+  const lucroLiqAcumulado = resLiq - investimentos;
 
   const pct = v => recLiq > 0 ? (v/recLiq*100).toFixed(1)+'%' : '—';
   const fmt = v => 'R$ '+Math.abs(v).toLocaleString('pt-BR',{minimumFractionDigits:2});
@@ -1568,6 +1577,8 @@ function renderDRE(){
     {label:'(-) Impostos Diretos (IRPJ/CSLL)', val:-valImpDireto, pct:pct(valImpDireto), cls:'negativo', bold:false},
     ...Object.entries(impDiretoCats).map(([k,v])=>({label:'  '+k, val:-v, pct:pct(v), cls:'indent', bold:false})),
     {label:'= Resultado Líquido', val:resLiq, pct:pct(resLiq), cls:'total '+(resLiq>=0?'positivo':'negativo'), bold:true},
+    {label:'(-) Investimentos', val:-investimentos, pct:pct(investimentos), cls:'negativo', bold:false},
+    {label:'= Lucro Líquido Acumulado', val:lucroLiqAcumulado, pct:pct(lucroLiqAcumulado), cls:'total '+(lucroLiqAcumulado>=0?'positivo':'negativo'), bold:true},
   ];
 
   document.getElementById('dreTable').innerHTML = `
@@ -1585,9 +1596,9 @@ function renderDRE(){
 
   // Gráfico barras DRE
   if(charts.dre) charts.dre.destroy();
-  const dreLabels = ['Rec. Líquida','Custos','Desp. Op.','Desp. Financ.','Imp. Diretos','Res. Líquido'];
-  const dreVals   = [recLiq, custos, despOpTotal, despFinanceiras, valImpDireto, resLiq];
-  const dreColors = [C,'#B87355','#C4896C','#DDB89A','#7A3F27', resLiq>=0?'#2d7a4f':'#e8a05a'];
+  const dreLabels = ['Rec. Líquida','Custos','Desp. Op.','Desp. Financ.','Imp. Diretos','Res. Líquido','Investimentos','Lucro Acumulado'];
+  const dreVals   = [recLiq, custos, despOpTotal, despFinanceiras, valImpDireto, resLiq, investimentos, lucroLiqAcumulado];
+  const dreColors = [C,'#B87355','#C4896C','#DDB89A','#7A3F27', resLiq>=0?'#2d7a4f':'#e8a05a', '#8a6d5c', lucroLiqAcumulado>=0?'#2d7a4f':'#e8a05a'];
   charts.dre = new Chart(document.getElementById('chartDre'),{
     type:'bar',
     data:{labels:dreLabels,datasets:[{data:dreVals,backgroundColor:dreColors,borderRadius:8,borderSkipped:false,
@@ -1597,11 +1608,11 @@ function renderDRE(){
 
   // Gráfico percentuais
   if(charts.drePct) charts.drePct.destroy();
-  const pctLabels = ['Custos','Desp. Op.','Desp. Financ.','Imp. Diretos','Resultado Líq.'];
-  const pctVals   = [custos, despOpTotal, despFinanceiras, valImpDireto, Math.max(0,resLiq)].map(v=>recLiq>0?+(v/recLiq*100).toFixed(1):0);
+  const pctLabels = ['Custos','Desp. Op.','Desp. Financ.','Imp. Diretos','Resultado Líq.','Investimentos','Lucro Acumulado'];
+  const pctVals   = [custos, despOpTotal, despFinanceiras, valImpDireto, Math.max(0,resLiq), investimentos, Math.max(0,lucroLiqAcumulado)].map(v=>recLiq>0?+(v/recLiq*100).toFixed(1):0);
   charts.drePct = new Chart(document.getElementById('chartDrePct'),{
     type:'bar',
-    data:{labels:pctLabels,datasets:[{data:pctVals,backgroundColor:['#B87355','#C4896C','#DDB89A','#7A3F27',resLiq>=0?'#2d7a4f':'#e8a05a'],borderRadius:6,borderSkipped:false,
+    data:{labels:pctLabels,datasets:[{data:pctVals,backgroundColor:['#B87355','#C4896C','#DDB89A','#7A3F27',resLiq>=0?'#2d7a4f':'#e8a05a','#8a6d5c',lucroLiqAcumulado>=0?'#2d7a4f':'#e8a05a'],borderRadius:6,borderSkipped:false,
       datalabels:{anchor:'end',align:'end',offset:2,color:'#7A3F27',font:{size:10,family:'DM Sans',weight:'500'},formatter:v=>v+'%'}}]},
     options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},datalabels:{display:true},tooltip:{callbacks:{label:ctx=>' '+ctx.raw+'%'}}},scales:{x:{grid:{display:false},ticks:{color:'#A07060',font:{size:10,family:'DM Sans'}}},y:{grid:{color:'#edd4c455'},ticks:{color:'#A07060',font:{size:9,family:'DM Sans'},callback:v=>v+'%'},beginAtZero:true}}}
   });
